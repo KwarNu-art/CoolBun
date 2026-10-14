@@ -9,7 +9,8 @@
 static NSInteger gFPSCap = 0;      // 0 = leave app default
 static CGFloat gScale = 1.0;       // render scale multiplier
 static NSHashTable *gLinks;
-static char kIgnore, kOrig;
+static BOOL gIPadStyle = NO;       // YES = shrink app to 65% (iPad-style view), centered
+static char kIgnore, kOrig, kBG;
 
 #pragma mark - Helpers
 
@@ -118,7 +119,7 @@ static NSString *CBThermal(void) {
     [vc.view addSubview:self.btn];
 
     self.panel = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleDark]];
-    self.panel.frame = CGRectMake(12, h - 140 - 250, 230, 240);
+    self.panel.frame = CGRectMake(12, h - 140 - 290, 230, 280);
     self.panel.layer.cornerRadius = 14;
     self.panel.clipsToBounds = YES;
     self.panel.hidden = YES;
@@ -137,6 +138,8 @@ static NSString *CBThermal(void) {
     [self addSeg:@[@"Auto", @"60", @"45", @"30"] y:138 action:@selector(capChanged:)];
     [self addTitle:@"Render scale" y:176];
     [self addSeg:@[@"100%", @"75%", @"50%", @"35%"] y:196 action:@selector(scaleChanged:)];
+    [self addTitle:@"Screen style" y:234];
+    [self addSeg:@[@"Full", @"iPad 65%"] y:254 action:@selector(styleChanged:)];
 
     UIDevice.currentDevice.batteryMonitoringEnabled = YES;
     self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
@@ -184,6 +187,11 @@ static NSString *CBThermal(void) {
     [self applyScale];
 }
 
+- (void)styleChanged:(UISegmentedControl *)s {
+    gIPadStyle = (s.selectedSegmentIndex == 1);
+    [self applyScale];
+}
+
 - (void)tick:(CADisplayLink *)l {
     self.frames++;
     CFTimeInterval now = CACurrentMediaTime();
@@ -199,7 +207,7 @@ static NSString *CBThermal(void) {
     self.info.text = [NSString stringWithFormat:
         @"UI FPS  %ld\nCPU     %.0f%%\nRAM     %.0f MB\nHeat    %@\nBattery %.0f%%",
         (long)self.fps, CBCPU(), CBRAM(), CBThermal(), bat < 0 ? 0 : bat];
-    if (gScale < 1.0 || gFPSCap > 0) [self applyScale];   // catch newly created views
+    if (gScale < 1.0 || gFPSCap > 0 || gIPadStyle) [self applyScale];   // catch newly created views
 }
 
 #pragma mark Render scale / MTKView cap
@@ -221,8 +229,24 @@ static NSString *CBThermal(void) {
 }
 
 - (void)applyScale {
-    for (UIWindow *w in UIApplication.sharedApplication.windows)
-        if (w != self.win) [self scan:w];
+    for (UIWindow *w in UIApplication.sharedApplication.windows) {
+        if (w == self.win) continue;
+        [self scan:w];
+
+        // iPad-style: only the app's normal windows (not keyboard/alerts)
+        if (w.windowLevel != UIWindowLevelNormal) continue;
+        if (gIPadStyle) {
+            if (!objc_getAssociatedObject(w, &kBG))
+                objc_setAssociatedObject(w, &kBG, w.backgroundColor ?: UIColor.clearColor,
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            w.backgroundColor = UIColor.blackColor;
+            w.transform = CGAffineTransformMakeScale(0.65, 0.65);
+        } else if (!CGAffineTransformIsIdentity(w.transform)) {
+            w.transform = CGAffineTransformIdentity;
+            UIColor *bg = objc_getAssociatedObject(w, &kBG);
+            if (bg) w.backgroundColor = bg;
+        }
+    }
 }
 @end
 
